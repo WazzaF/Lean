@@ -27,6 +27,7 @@ namespace QuantConnect.Algorithm.Framework.Portfolio
     public class PortfolioConstructionModelPythonWrapper : PortfolioConstructionModel
     {
         private readonly dynamic _model;
+        private readonly bool _implementsCreateTargets;
 
         /// <summary>
         /// True if should rebalance portfolio on security changes. True by default
@@ -85,8 +86,11 @@ namespace QuantConnect.Algorithm.Framework.Portfolio
                         throw new NotImplementedException($"IPortfolioConstructionModel.{attributeName} must be implemented. Please implement this missing method on {model.GetPythonType()}");
                     }
                 }
+
+                _implementsCreateTargets = model.GetPythonMethod("CreateTargets") != null;
+                _model = model;
+                _model.SetPythonWrapper(this);
             }
-            _model = model;
         }
 
         /// <summary>
@@ -99,14 +103,24 @@ namespace QuantConnect.Algorithm.Framework.Portfolio
         {
             using (Py.GIL())
             {
-                var targets = _model.CreateTargets(algorithm, insights) as PyObject;
-                var iterator = targets.GetIterator();
-                foreach (PyObject target in iterator)
+                if (_implementsCreateTargets)
                 {
-                    yield return target.GetAndDispose<IPortfolioTarget>();
+                    var targets = _model.CreateTargets(algorithm, insights) as PyObject;
+                    var iterator = targets.GetIterator();
+                    foreach (PyObject target in iterator)
+                    {
+                        yield return target.GetAndDispose<IPortfolioTarget>();
+                    }
+                    iterator.Dispose();
+                    targets.Dispose();
                 }
-                iterator.Dispose();
-                targets.Dispose();
+                else
+                {
+                    foreach (var target in _model.CreateTargets(algorithm, insights))
+                    {
+                        yield return target;
+                    }
+                }
             }
         }
 
@@ -120,6 +134,69 @@ namespace QuantConnect.Algorithm.Framework.Portfolio
             using (Py.GIL())
             {
                 _model.OnSecuritiesChanged(algorithm, changes);
+            }
+        }
+
+        /// <summary>
+        /// Method that will determine if the portfolio construction model should create a
+        /// target for this insight
+        /// </summary>
+        /// <param name="insight">The insight to create a target for</param>
+        /// <returns>True if the portfolio should create a target for the insight</returns>
+        protected override bool ShouldCreateTargetForInsight(Insight insight)
+        {
+            using (Py.GIL())
+            {
+                return _model.ShouldCreateTargetForInsight(insight);
+            }
+        }
+
+        /// <summary>
+        /// Determines if the portfolio should be rebalanced base on the provided rebalancing func,
+        /// if any security change have been taken place or if an insight has expired or a new insight arrived
+        /// If the rebalancing function has not been provided will return true.
+        /// </summary>
+        /// <param name="insights">The insights to create portfolio targets from</param>
+        /// <param name="algorithmUtc">The current algorithm UTC time</param>
+        /// <returns>True if should rebalance</returns>
+        protected override bool IsRebalanceDue(Insight[] insights, DateTime algorithmUtc)
+        {
+            using (Py.GIL())
+            {
+                return _model.IsRebalanceDue(insights, algorithmUtc);
+            }
+        }
+
+        /// <summary>
+        /// Gets the target insights to calculate a portfolio target percent for
+        /// </summary>
+        /// <returns>An enumerable of the target insights</returns>
+        protected override List<Insight> GetTargetInsights()
+        {
+            using (Py.GIL())
+            {
+                return _model.GetTargetInsights();
+            }
+        }
+
+        /// <summary>
+        /// Will determine the target percent for each insight
+        /// </summary>
+        /// <param name="activeInsights">The active insights to generate a target for</param>
+        /// <returns>A target percent for each insight</returns>
+        protected override Dictionary<Insight, double> DetermineTargetPercent(ICollection<Insight> activeInsights)
+        {
+            using (Py.GIL())
+            {
+                var dic = new Dictionary<Insight, double>();
+                var result = _model.DetermineTargetPercent(activeInsights);
+                foreach (var pyInsight in result)
+                {
+                    var insight = (pyInsight as PyObject).As<Insight>();
+                    dic[insight] = result[pyInsight];
+                }
+
+                return dic;
             }
         }
     }

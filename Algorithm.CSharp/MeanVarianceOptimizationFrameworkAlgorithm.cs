@@ -22,12 +22,13 @@ using QuantConnect.Algorithm.Framework.Selection;
 using QuantConnect.Interfaces;
 using System.Linq;
 using QuantConnect.Data.UniverseSelection;
+using QuantConnect.Orders;
 
 namespace QuantConnect.Algorithm.CSharp
 {
     public class MeanVarianceOptimizationFrameworkAlgorithm : QCAlgorithm, IRegressionAlgorithmDefinition
     {
-        private IEnumerable<Symbol> _symbols = (new string[] { "AIG", "BAC", "IBM", "SPY" }).Select(s => QuantConnect.Symbol.Create(s, SecurityType.Equity, Market.USA));
+        private IEnumerable<Symbol> _symbols = (new[] { "AIG", "BAC", "IBM", "SPY" }).Select(s => QuantConnect.Symbol.Create(s, SecurityType.Equity, Market.USA));
 
         /// <summary>
         /// Initialise the data and resolution required, as well as the cash and start-end dates for your algorithm. All algorithms must initialized.
@@ -58,6 +59,14 @@ namespace QuantConnect.Algorithm.CSharp
         {
             int last = Time.Day > 8 ? 3 : _symbols.Count();
             return _symbols.Take(last);
+        }
+
+        public override void OnOrderEvent(OrderEvent orderEvent)
+        {
+            if (orderEvent.Status == OrderStatus.Filled)
+            {
+                Log($"{orderEvent}");
+            }
         }
 
         public bool CanRunLocally => true;
